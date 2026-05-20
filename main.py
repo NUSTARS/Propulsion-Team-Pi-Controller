@@ -15,6 +15,7 @@ SOLENOID_ETHANOL_PIN = -1
 SOLENOID_OXYGEN_PIN = -1
 SERVO_NITROGEN_PURGE_PIN = -1
 SERVO_NITROGEN_IN_PIN = -1
+SPARK_PLUG_PIN = -1
 
 
 # Pin setup
@@ -26,14 +27,17 @@ GPIO.setmode(GPIO.BCM)
 # Format: GPIO.setup(<pin number>, <GPIO.IN or GPIO.OUT>)
 
 # PWM Initializations
-pwm_1_nitrogen_purge = GPIO.PWM(SERVO_NITROGEN_PURGE_PIN, 50)
-pwm_1_nitrogen_purge.start(0)
-pwm_2_nitrogen_in = GPIO.PWM(SERVO_NITROGEN_IN_PIN, 50)
-pwm_2_nitrogen_in.start(0)
+pwm_nitrogen_purge = GPIO.PWM(SERVO_NITROGEN_PURGE_PIN, 50)
+pwm_nitrogen_purge.start(0)
+pwm_nitrogen_in = GPIO.PWM(SERVO_NITROGEN_IN_PIN, 50)
+pwm_nitrogen_in.start(0)
+pwm_spark_plug = GPIO.PWM(SPARK_PLUG_PIN, 50)
+pwm_spark_plug.start(0)
 
 # Initial states
 solenoid_state = 0x0
 servo_state = 0x0
+spark_plug_state = 0x0
 
 # Serial communication setup
 ser = serial.Serial('/dev/ttyS0', 9600, timeout=0)
@@ -59,12 +63,12 @@ def setSolenoids(received_data: bytes, state: int) -> int:
     # Only update when value is updated
     if ((received_data[0] & 0b00000001) != (state & 0b00000001)): # Check 1st bit
         # Set ethanol solenoid valve state (0 for closed, 1 for open)
-        GPIO.output(SOLENOID_ETHANOL_PIN, GPIO.HIGH if (received_data[0] & 0b00000001) else GPIO.LOW)
         state ^= 0b00000001 # Toggle 1st bit
+        GPIO.output(SOLENOID_ETHANOL_PIN, GPIO.HIGH if (received_data[0] & 0b00000001) else GPIO.LOW)
     if ((received_data[0] & 0b00000010) != (state & 0b00000010)): # Check 2nd bit
         # Set oxygen solenoid valve state (0 for closed, 1 for open)
-        GPIO.output(SOLENOID_OXYGEN_PIN, GPIO.HIGH if (received_data[0] & 0b00000010) else GPIO.LOW)
         state ^= 0b00000010 # Toggle 2nd bit
+        GPIO.output(SOLENOID_OXYGEN_PIN, GPIO.HIGH if (received_data[0] & 0b00000010) else GPIO.LOW)
     return state
 
 
@@ -72,12 +76,25 @@ def setBallvalves(received_data: bytes, state: int) -> int:
     # Only update when value is updated
     if ((received_data[0] & 0b00000100) != (state & 0b00000100)): # Check 3rd bit
         # Set nitrogen purge valve state (0 for closed, 1 for open)
-        GPIO.output(SERVO_NITROGEN_PURGE_PIN, GPIO.HIGH if (received_data[0] & 0b00000100) else GPIO.LOW)
         state ^= 0b00000100 # Toggle 3rd bit
+        setAngle(OPEN_ANGLE if (received_data[0] & 0b00000100) else CLOSED_ANGLE, pwm_nitrogen_purge)
     if ((received_data[0] & 0b00001000) != (state & 0b00001000)): # Check 4th bit
         # Set nitrogen in valve state (0 for closed, 1 for open)
-        GPIO.output(SERVO_NITROGEN_IN_PIN, GPIO.HIGH if (received_data[0] & 0b00001000) else GPIO.LOW)
         state ^= 0b00001000 # Toggle 4th bit
+        setAngle(OPEN_ANGLE if (received_data[0] & 0b00001000) else CLOSED_ANGLE, pwm_nitrogen_in)
+    return state
+
+
+def setSparkPlug(received_data: bytes, state: int) -> int:
+    # Only update when value is updated
+    if ((received_data[0] & 0b00010000) != (state & 0b00010000)): # Check 5th bit
+        # Set spark plug state (0 for off, 1 for on)
+        state ^= 0b00010000 # Toggle 5th bit
+        # TODO: Start PWM to turn on spark plug
+        if (received_data[0] & 0b00010000):
+            pass
+        else:
+            pass
     return state
 
 
@@ -107,10 +124,8 @@ try:
             # Set ball valve states based on received data (3rd and 4th bits)
             servo_state = setBallvalves(received_data, servo_state)
             
-            if (received_data[0] & 0b00010000): # Check 5th bit
-                pass # TODO: Turn on spark plug 
-            else:
-                pass # TODO: Turn off spark plug
+            # Set spark plug state based on received data (5th bit)
+            spark_plug_state = setSparkPlug(received_data, spark_plug_state)
 
         sleep(0.01) # Delay to prevent CPU overuse
 
